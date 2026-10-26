@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e6b73">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Lethality Factor Calculator</title>
+<style>
+:root{--bg:#f2f5f6;--panel:#fff;--ink:#14232b;--mute:#58707b;--line:#d3dde1;--acc:#0e6b73;--accbg:#e1f0f1;--warn:#9a5b00;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1a1f;--panel:#16252c;--ink:#e6eff2;--mute:#8fa8b2;--line:#2b414a;--acc:#57c4cd;--accbg:#12353a;--warn:#e5a84b;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1a1f;--panel:#16252c;--ink:#e6eff2;--mute:#8fa8b2;--line:#2b414a;--acc:#57c4cd;--accbg:#12353a;--warn:#e5a84b;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+main{max-width:880px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.6rem;margin:0 0 4px}
+p.sub{margin:0 0 20px;color:var(--mute);max-width:62ch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:16px}
+h2{font-size:1.05rem;margin:0 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+label{display:block;font-size:.85rem;color:var(--mute);margin-bottom:4px}
+input[type=number]{width:100%;padding:8px 10px;font:500 1rem ui-monospace,Menlo,Consolas,monospace;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px}
+input:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+input[type=range]{width:100%;accent-color:var(--acc);margin-top:6px}
+.res{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:4px}
+.res div{background:var(--accbg);border-radius:4px;padding:12px}
+.res b{display:block;font:500 1.35rem ui-monospace,Menlo,Consolas,monospace;color:var(--acc);overflow-wrap:anywhere}
+.res span{font-size:.85rem;color:var(--mute)}
+.note{color:var(--warn);font-size:.9rem;min-height:1.3em;margin:10px 0 0}
+button{font:600 .95rem system-ui,sans-serif;padding:8px 14px;border-radius:4px;border:1px solid var(--acc);background:var(--acc);color:var(--panel);cursor:pointer}
+button.alt{background:transparent;color:var(--acc)}
+.wrap{overflow-x:auto;max-height:420px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;margin-top:12px}
+table{border-collapse:collapse;width:100%;font:400 .9rem ui-monospace,Menlo,Consolas,monospace}
+th,td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{position:sticky;top:0;background:var(--panel);font-family:system-ui,sans-serif;font-weight:600}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+</style>
+</head>
+<body>
+<main>
+<h1>Lethality factor calculator</h1>
+<p class="sub">LF = 10^((T − Tref) / Z) per minute. Accumulated F₀ = LF × time, valid for a constant temperature.</p>
+
+<section class="card">
+<h2>Single point</h2>
+<div class="grid">
+<div><label for="T">Temperature (°C), 50 to 400</label><input id="T" type="number" step="0.1" value="121.5"><input id="Tr" type="range" min="50" max="400" step="0.5" value="121.5" aria-label="Temperature slider"></div>
+<div><label for="t">Time (min), 1 to 1000</label><input id="t" type="number" step="1" value="30"><input id="tr" type="range" min="1" max="1000" step="1" value="30" aria-label="Time slider"></div>
+<div><label for="Tref">Tref (°C)</label><input id="Tref" type="number" step="0.1" value="121.1"></div>
+<div><label for="Z">Z (°C)</label><input id="Z" type="number" step="0.1" value="10"></div>
+<div><label for="D">D at Tref (min), optional</label><input id="D" type="number" step="0.1" value="1"></div>
+</div>
+<div class="res" aria-live="polite">
+<div><span>LF per minute</span><b id="oLF">–</b></div>
+<div><span>F₀ over the chosen time (min)</span><b id="oF">–</b></div>
+<div><span>Log reduction (F₀ / D)</span><b id="oL">–</b></div>
+</div>
+<p class="note" id="msg"></p>
+</section>
+
+<section class="card">
+<h2>Temperature table</h2>
+<div class="grid">
+<div><label for="a">From (°C)</label><input id="a" type="number" value="50"></div>
+<div><label for="b">To (°C)</label><input id="b" type="number" value="400"></div>
+<div><label for="s">Step (°C)</label><input id="s" type="number" step="0.5" value="10"></div>
+</div>
+<div class="row"><button id="go">Build table</button><button id="csv" class="alt">Download CSV</button></div>
+<p class="note" id="tmsg"></p>
+<div class="wrap"><table><thead><tr><th>T (°C)</th><th>LF / min</th><th id="fh">F₀ (min)</th></tr></thead><tbody id="tb"></tbody></table></div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+function fmt(x){if(!isFinite(x))return "overflow";if(x===0)return "0";const a=Math.abs(x);return (a<1e-4||a>=1e6)?x.toExponential(4):String(+x.toPrecision(8));}
+function num(id){return parseFloat($(id).value);}
+function lf(T,Tref,Z){return Math.pow(10,(T-Tref)/Z);}
+function calc(){
+  const T=num("T"),t=num("t"),Tref=num("Tref"),Z=num("Z"),D=num("D");
+  let m=[];
+  if(!(Z>0)){m.push("Z must be greater than 0.");}
+  if(!(T>=50&&T<=400))m.push("Temperature is outside 50 to 400 °C.");
+  if(!(t>=1&&t<=1000))m.push("Time is outside 1 to 1000 min.");
+  if(!isFinite(T)||!isFinite(t)||!isFinite(Tref)||!(Z>0)){$("oLF").textContent=$("oF").textContent=$("oL").textContent="–";$("msg").textContent=m.join(" ")||"Enter all values.";return;}
+  const L=lf(T,Tref,Z),F=L*t;
+  $("oLF").textContent=fmt(L);$("oF").textContent=fmt(F);
+  $("oL").textContent=(D>0)?fmt(F/D):"–";
+  $("msg").textContent=m.join(" ");
+}
+function sync(a,b){$(a).addEventListener("input",()=>{$(b).value=$(a).value;calc();tbl();});}
+sync("T","Tr");sync("Tr","T");sync("t","tr");sync("tr","t");
+["Tref","Z","D"].forEach(i=>$(i).addEventListener("input",()=>{calc();tbl();}));
+let rows=[];
+function tbl(){
+  const a=num("a"),b=num("b"),s=num("s"),t=num("t"),Tref=num("Tref"),Z=num("Z");
+  $("tb").innerHTML="";rows=[];
+  if(![a,b,s,t,Tref,Z].every(isFinite)||s<=0||!(Z>0)||b<a){$("tmsg").textContent="Check the range: From ≤ To, step above 0, and time and Z set.";return;}
+  const n=Math.floor((b-a)/s+1e-9)+1;
+  if(n>2000){$("tmsg").textContent="That gives "+n+" rows. Use a larger step (2000 rows maximum).";return;}
+  $("tmsg").textContent="";$("fh").textContent="F₀ for "+t+" min";
+  let h="";
+  for(let i=0;i<n;i++){const T=+(a+i*s).toFixed(6),L=lf(T,Tref,Z),F=L*t;rows.push([T,L,F]);h+="<tr><td>"+T+"</td><td>"+fmt(L)+"</td><td>"+fmt(F)+"</td></tr>";}
+  $("tb").innerHTML=h;
+}
+$("go").addEventListener("click",tbl);
+["a","b","s"].forEach(i=>$(i).addEventListener("input",tbl));
+$("csv").addEventListener("click",()=>{
+  if(!rows.length)return;
+  const txt="T_C,LF_per_min,F0_min\n"+rows.map(r=>r.join(",")).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/csv"}));a.download="lethality_table.csv";document.body.appendChild(a);a.click();a.remove();
+});
+calc();tbl();
+if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
+</script>
+</body>
+</html>

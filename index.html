@@ -72,7 +72,55 @@ th{position:sticky;top:0;background:var(--panel);font-family:system-ui,sans-seri
 <p class="note" id="tmsg"></p>
 <div class="wrap"><table><thead><tr><th>T (°C)</th><th>LF / min</th><th id="fh">F₀ (min)</th></tr></thead><tbody id="tb"></tbody></table></div>
 </section>
+
+<section class="card">
+<h2>Cycle log (cumulative F₀)</h2>
+<p class="sub" style="margin-bottom:12px">Paste time and temperature, one pair per line (comma, space, tab or semicolon). Header lines are skipped. A single column is read as temperatures at a fixed interval. Uses Tref, Z and D from above, and trapezoidal integration of LF.</p>
+<div class="grid">
+<div><label for="lu">Time unit in the data</label><select id="lu" style="width:100%;padding:8px 10px;font:inherit;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px"><option value="1">minutes</option><option value="0.0166666667">seconds</option></select></div>
+<div><label for="li">Interval if one column (same unit)</label><input id="li" type="number" step="any" value="1"></div>
+<div><label for="lh">Hold threshold (°C)</label><input id="lh" type="number" step="0.1" value="121"></div>
+</div>
+<label for="lg" style="margin-top:12px">Log data</label>
+<textarea id="lg" rows="7" style="width:100%;padding:8px 10px;font:400 .9rem ui-monospace,Menlo,Consolas,monospace;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px" placeholder="0, 25&#10;10, 90&#10;20, 121.5"></textarea>
+<div class="row"><button id="lc">Calculate F₀</button><button id="lx" class="alt">Load example</button><button id="lcsv" class="alt">Download CSV</button></div>
+<p class="note" id="lmsg"></p>
+<div class="res" aria-live="polite">
+<div><span>Total F₀ (min)</span><b id="rF">–</b></div>
+<div><span>Log reduction (F₀ / D)</span><b id="rL">–</b></div>
+<div><span>Duration (min)</span><b id="rD">–</b></div>
+<div><span>Peak temperature (°C)</span><b id="rP">–</b></div>
+<div><span id="rhl">Time at or above threshold (min)</span><b id="rH">–</b></div>
+</div>
+<div class="wrap"><table><thead><tr><th>Time (min)</th><th>T (°C)</th><th>LF / min</th><th>Cumulative F₀</th></tr></thead><tbody id="lb"></tbody></table></div>
+</section>
+
+<section class="card">
+<h2>Saturated steam table</h2>
+<p class="sub" style="margin-bottom:12px">IAPWS-IF97. Valid 0.01 to 350 °C. Pressures in bar absolute unless marked barg (barg = bar abs − 1.01325).</p>
+<div class="grid">
+<div><label for="sm">Look up by</label><select id="sm" style="width:100%;padding:8px 10px;font:inherit;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px"><option value="T">Temperature (°C)</option><option value="pa">Pressure (bar abs)</option><option value="pg">Pressure (barg)</option></select></div>
+<div><label for="sv">Value</label><input id="sv" type="number" step="any" value="121.1"></div>
+</div>
+<div class="res" id="sr" aria-live="polite"></div>
+<p class="note" id="smsg"></p>
+<h2 style="margin-top:16px">Table by temperature</h2>
+<div class="grid">
+<div><label for="ta">From (°C)</label><input id="ta" type="number" value="100"></div>
+<div><label for="tb2">To (°C)</label><input id="tb2" type="number" value="150"></div>
+<div><label for="ts">Step (°C)</label><input id="ts" type="number" step="any" value="5"></div>
+</div>
+<div class="wrap"><table><thead><tr><th>T °C</th><th>p bar a</th><th>p barg</th><th>vf m³/kg</th><th>vg m³/kg</th><th>hf kJ/kg</th><th>hfg</th><th>hg</th><th>sf kJ/kg·K</th><th>sg</th></tr></thead><tbody id="st"></tbody></table></div>
+</section>
+
+<section class="card">
+<h2>Mollier chart (h–s)</h2>
+<div class="grid"><div><label for="mv">View</label><select id="mv" style="width:100%;padding:8px 10px;font:inherit;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px"><option value="1">Sterilization range</option><option value="0">Full chart</option></select></div></div>
+<p class="sub" style="margin:10px 0">Dashed lines are constant steam quality, solid lines are constant pressure (bar abs). The markers show the saturated liquid and vapor states from the steam table lookup above.</p>
+<div class="wrap" style="max-height:none"><div id="mc"></div></div>
+</section>
 </main>
+<script src="steam.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 function fmt(x){if(!isFinite(x))return "overflow";if(x===0)return "0";const a=Math.abs(x);return (a<1e-4||a>=1e6)?x.toExponential(4):String(+x.toPrecision(8));}
@@ -112,6 +160,99 @@ $("csv").addEventListener("click",()=>{
   const txt="T_C,LF_per_min,F0_min\n"+rows.map(r=>r.join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/csv"}));a.download="lethality_table.csv";document.body.appendChild(a);a.click();a.remove();
 });
+
+function parseLog(text,unit,interval){
+  const rows=[];let skipped=0,k=0;
+  for(const line of text.split(/\r?\n/)){
+    const p=line.trim().split(/[\s,;\t]+/).filter(x=>x!=="").map(Number);
+    if(!p.length||p.some(x=>!isFinite(x))){if(line.trim())skipped++;continue;}
+    if(p.length>=2)rows.push([p[0]*unit,p[1]]);
+    else{rows.push([k*interval*unit,p[0]]);k++;}
+  }
+  return {rows,skipped};
+}
+function integrate(rows,Tref,Z){
+  const out=[];let F=0,peak=-Infinity,above=0;
+  for(let i=0;i<rows.length;i++){
+    const [t,T]=rows[i];const L=Math.pow(10,(T-Tref)/Z);
+    if(i>0){const [t0,T0]=rows[i-1];const L0=Math.pow(10,(T0-Tref)/Z);const dt=t-t0;F+=dt*(L0+L)/2;}
+    out.push([t,T,L,F]);if(T>peak)peak=T;
+  }
+  return {out,F,peak};
+}
+
+let logRows=[];
+function runLog(){
+  const Tref=num("Tref"),Z=num("Z"),D=num("D"),u=parseFloat($("lu").value),iv=num("li"),th=num("lh");
+  const {rows,skipped}=parseLog($("lg").value,u,isFinite(iv)&&iv>0?iv:1);
+  $("lb").innerHTML="";logRows=[];
+  ["rF","rL","rD","rP","rH"].forEach(i=>$(i).textContent="–");
+  if(!(Z>0)||!isFinite(Tref)){$("lmsg").textContent="Set Tref and Z (above) first.";return;}
+  if(rows.length<2){$("lmsg").textContent="Need at least two data points.";return;}
+  for(let i=1;i<rows.length;i++){if(rows[i][0]<rows[i-1][0]){$("lmsg").textContent="Time must not go backwards (check line "+(i+1)+" of the data).";return;}}
+  const r=integrate(rows,Tref,Z);
+  let hold=0;
+  for(let i=1;i<rows.length;i++){const a=rows[i-1],b=rows[i];if(a[1]>=th&&b[1]>=th)hold+=b[0]-a[0];}
+  $("rF").textContent=fmt(r.F);$("rL").textContent=D>0?fmt(r.F/D):"–";
+  $("rD").textContent=fmt(rows[rows.length-1][0]-rows[0][0]);$("rP").textContent=fmt(r.peak);
+  $("rH").textContent=fmt(hold);$("rhl").textContent="Time at or above "+th+" °C (min)";
+  logRows=r.out;
+  let h="";const lim=Math.min(r.out.length,3000);
+  for(let i=0;i<lim;i++){const o=r.out[i];h+="<tr><td>"+fmt(o[0])+"</td><td>"+o[1]+"</td><td>"+fmt(o[2])+"</td><td>"+fmt(o[3])+"</td></tr>";}
+  $("lb").innerHTML=h;
+  $("lmsg").textContent=(skipped?skipped+" non-numeric line(s) skipped. ":"")+(r.out.length>lim?"Table shows the first "+lim+" rows; the total uses all "+r.out.length+".":"");
+}
+$("lc").addEventListener("click",runLog);
+["lu","li","lh","Tref","Z","D"].forEach(i=>$(i).addEventListener("input",()=>{if($("lg").value.trim())runLog();}));
+$("lx").addEventListener("click",()=>{
+  $("lu").value="1";
+  $("lg").value="time_min,temp_C\n0,25\n10,70\n20,110\n25,121.5\n30,121.5\n35,121.5\n40,121.5\n45,121.5\n50,121.5\n55,121.5\n60,121.5\n65,121.5\n70,100\n80,60\n90,40";
+  runLog();
+});
+$("lcsv").addEventListener("click",()=>{
+  if(!logRows.length)return;
+  const txt="time_min,T_C,LF_per_min,cumulative_F0_min\n"+logRows.map(r=>r.join(",")).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/csv"}));a.download="cumulative_F0.csv";document.body.appendChild(a);a.click();a.remove();
+});
+
+const BAR=1.01325;
+function sp(){const m=$("sm").value,v=num("sv");let T,msg="";
+ if(!isFinite(v))return{msg:"Enter a value."};
+ if(m==="T"){T=v+273.15;}else{const pb=m==="pa"?v:v+BAR;const p=pb/10;if(p<psat(273.16)||p>psat(623.15))return{msg:"Pressure is outside 0.00611 to 165.29 bar abs."};T=tsat(p);}
+ if(T<273.15||T>623.15)return{msg:"Temperature is outside 0.01 to 350 °C."};
+ return{s:sat(T)};}
+function steam(){const r=sp(),o=$("sr");$("smsg").textContent=r.msg||"";
+ if(!r.s){o.innerHTML="";drawM();return;}
+ const s=r.s,b=s.p*10,c=[["T sat (°C)",s.T-273.15,4],["p (bar abs)",b,6],["p (barg)",b-BAR,6],["vf (m³/kg)",s.vf,6],["vg (m³/kg)",s.vg,6],["hf (kJ/kg)",s.hf,6],["hfg (kJ/kg)",s.hfg,6],["hg (kJ/kg)",s.hg,6],["sf (kJ/kg·K)",s.sf,5],["sg (kJ/kg·K)",s.sg,5]];
+ o.innerHTML=c.map(x=>"<div><span>"+x[0]+"</span><b>"+fmt(+x[1].toPrecision(x[2]))+"</b></div>").join("");
+ drawM(s);}
+function stab(){const a=num("ta"),b=num("tb2"),st=num("ts");let h="";
+ if(![a,b,st].every(isFinite)||st<=0||b<a||a<0.01||b>350||(b-a)/st>400){$("st").innerHTML="";return;}
+ for(let i=0;i<=Math.floor((b-a)/st+1e-9);i++){const T=+(a+i*st).toFixed(6),s=sat(T+273.15),p=s.p*10;
+  h+="<tr><td>"+T+"</td><td>"+p.toFixed(4)+"</td><td>"+(p-BAR).toFixed(4)+"</td><td>"+s.vf.toFixed(6)+"</td><td>"+s.vg.toFixed(5)+"</td><td>"+s.hf.toFixed(2)+"</td><td>"+s.hfg.toFixed(2)+"</td><td>"+s.hg.toFixed(2)+"</td><td>"+s.sf.toFixed(4)+"</td><td>"+s.sg.toFixed(4)+"</td></tr>";}
+ $("st").innerHTML=h;}
+function drawM(pt){
+ const z=$("mv").value==="1",W=720,H=480,L=58,Rr=14,Tp=12,B=40,[s0,s1,h0,h1]=z?[5.8,7.8,2100,2900]:[0,9.5,0,3800];
+ const X=s=>L+(s-s0)/(s1-s0)*(W-L-Rr),Y=h=>H-B-(h-h0)/(h1-h0)*(H-Tp-B),P=a=>a.map((q,i)=>(i?"L":"M")+X(q[0]).toFixed(1)+" "+Y(q[1]).toFixed(1)).join("");
+ const gs=z?.2:1,gh=z?100:500;let o='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;min-width:560px;height:auto;font:11px system-ui,sans-serif" role="img" aria-label="Mollier h-s chart"><defs><clipPath id="cp"><rect x="'+L+'" y="'+Tp+'" width="'+(W-L-Rr)+'" height="'+(H-Tp-B)+'"/></clipPath></defs>';
+ for(let s=Math.ceil(s0/gs)*gs;s<=s1+1e-9;s+=gs)o+='<line x1="'+X(s)+'" x2="'+X(s)+'" y1="'+Tp+'" y2="'+(H-B)+'" stroke="var(--line)"/><text x="'+X(s)+'" y="'+(H-B+14)+'" text-anchor="middle" fill="var(--mute)">'+(+s.toFixed(2))+'</text>';
+ for(let h=Math.ceil(h0/gh)*gh;h<=h1;h+=gh)o+='<line x1="'+L+'" x2="'+(W-Rr)+'" y1="'+Y(h)+'" y2="'+Y(h)+'" stroke="var(--line)"/><text x="'+(L-6)+'" y="'+(Y(h)+4)+'" text-anchor="end" fill="var(--mute)">'+h+'</text>';
+ o+='<text x="'+(L+(W-L-Rr)/2)+'" y="'+(H-6)+'" text-anchor="middle" fill="var(--ink)">s (kJ/kg·K)</text><text transform="translate(12 '+(Tp+(H-Tp-B)/2)+') rotate(-90)" text-anchor="middle" fill="var(--ink)">h (kJ/kg)</text><g clip-path="url(#cp)" fill="none">';
+ const dl=[],dv=[],ql={};const xs=z?[.8,.85,.9,.95]:[.1,.2,.3,.4,.5,.6,.7,.8,.9];xs.forEach(x=>ql[x]=[]);
+ for(let T=273.16;T<=623.15;T+=T<500?4:2){const s=sat(T);dl.push([s.sf,s.hf]);dv.push([s.sg,s.hg]);xs.forEach(x=>ql[x].push([s.sf+x*s.sfg,s.hf+x*s.hfg]));}
+ xs.forEach(x=>{o+='<path d="'+P(ql[x])+'" stroke="var(--mute)" stroke-dasharray="4 3"/>';const q=ql[x][z?20:40];});
+ const bars=z?[1,2,3,4,5,6]:[.1,1,5,10,50,100,160];
+ bars.forEach(b=>{const p=b/10,T=tsat(p),f=r1(T,p),g=r2(T,p),w=[[f.s,f.h],[g.s,g.h]],sh=[];
+  for(let t=T;t<=T+(z?90:420);t+=3){if(t>623.15&&p>348.05185628969-1.1671859879975*t+1.0192970039326e-3*t*t)break;const q=r2(t,p);sh.push([q.s,q.h]);}
+  o+='<path d="'+P(w)+'" stroke="var(--acc)"/><path d="'+P(sh)+'" stroke="var(--acc)"/>';
+  const e=sh[sh.length-1]||w[1];o+='<text x="'+(X(e[0])+3)+'" y="'+(Y(e[1])+4)+'" fill="var(--acc)">'+b+'</text>';});
+ o+='<path d="'+P(dl.concat(dv.reverse()))+'" stroke="var(--ink)" stroke-width="2"/>';
+ if(pt){o+='<path d="'+P([[pt.sf,pt.hf],[pt.sg,pt.hg]])+'" stroke="var(--warn)" stroke-width="2"/><circle cx="'+X(pt.sf)+'" cy="'+Y(pt.hf)+'" r="5" fill="var(--warn)"/><circle cx="'+X(pt.sg)+'" cy="'+Y(pt.hg)+'" r="5" fill="var(--warn)"/>';}
+ o+='</g><rect x="'+L+'" y="'+Tp+'" width="'+(W-L-Rr)+'" height="'+(H-Tp-B)+'" fill="none" stroke="var(--line)"/></svg>';
+ $("mc").innerHTML=o;}
+["sm","sv"].forEach(i=>$(i).addEventListener("input",steam));$("mv").addEventListener("input",()=>steam());
+["ta","tb2","ts"].forEach(i=>$(i).addEventListener("input",stab));
+steam();stab();
 calc();tbl();
 if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 </script>
